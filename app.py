@@ -1,9 +1,29 @@
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException
+from fastapi.middleware.cors import CORSMiddleware
+from pydantic import BaseModel
 import requests
 from bs4 import BeautifulSoup
 import uvicorn
+import openai
 
 app = FastAPI()
+
+# Add CORS middleware
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["http://localhost:3000"],  # React dev server
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+class TemplateRequest(BaseModel):
+    prompt: str
+    apiKey: str
+
+@app.get("/reply")
+def reply():
+    return {"message": "This is a reply from the FastAPI server."}
 
 @app.get("/fetch_info")
 def proxy(url: str):
