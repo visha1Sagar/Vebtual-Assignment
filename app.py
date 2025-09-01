@@ -95,151 +95,12 @@ def chat(request: ChatRequest):
             }
         
         elif request.step == "generate_template":
-            # Step 3: Fetch product info and generate template
-            try:
-                # Extract URLs from the message
-                urls = [url.strip() for url in request.message.strip().split('\n') if url.strip()]
-                
-                if not urls:
-                    return {
-                        "message": "Please provide at least one valid product URL.",
-                        "next_step": "generate_template"
-                    }
-                
-                # Fetch product information for each URL
-                products = []
-                for url in urls:
-                    try:
-                        import requests
-                        from bs4 import BeautifulSoup
-                        
-                        res = requests.get(url, headers={"User-Agent": "Mozilla/5.0"})
-                        soup = BeautifulSoup(res.text, "html.parser")
-
-                        # Try to extract Open Graph tags
-                        title = soup.find("meta", property="og:title")
-                        image = soup.find("meta", property="og:image")
-                        price = soup.find("meta", property="product:price:amount")
-
-                        # Fallback parsing
-                        if not title:
-                            title = soup.find("title") or soup.find("h1")
-                        if not image:
-                            img_tag = soup.find("img", {"class": lambda x: x and "product" in x.lower()}) \
-                                      or soup.find("img")
-                            image = img_tag["src"] if img_tag and img_tag.has_attr("src") else None
-                        if not price:
-                            price_tag = soup.find(lambda tag: tag.name in ["span","div"] and "price" in tag.get("class", []))
-                            price = price_tag.text.strip() if price_tag else None
-
-                        product_info = {
-                            "url": url,
-                            "title": title["content"] if title and title.has_attr("content") else title.text if title else "Unknown Product",
-                            "image": image["content"] if hasattr(image, "get") else image if image else "placeholder.jpg",
-                            "price": price["content"] if price and hasattr(price, "get") else price if price else "N/A"
-                        }
-                        products.append(product_info)
-                        
-                    except Exception as e:
-                        # Add placeholder data for failed fetches
-                        products.append({
-                            "url": url,
-                            "title": "Product Title",
-                            "image": "placeholder.jpg",
-                            "price": "N/A"
-                        })
-                
-                # Generate email template using OpenAI with product data and conversation context
-                context = request.conversation_context
-                print(f"DEBUG: Received conversation context: {context}")  # Debug log
-                
-                # Build the prompt with all collected information
-                prompt = f"""
-Create a professional HTML email template with the following requirements:
-
-**Template Details:**
-{context.get('prompt', 'Not given')}
-**Products to Feature:**
-"""
-                
-                for i, product in enumerate(products, 1):
-                    prompt += f"""
-Product {i}:
-- Title: {product['title']}
-- Price: {product['price']}
-- URL: {product['url']}
-- Image: {product['image']}
-"""
-                
-                prompt += """
-
-Please create a complete, responsive HTML email template that:
-1. Incorporates all the products with their details
-2. Matches what user has asked for in Template Details.
-3. Includes proper email-safe CSS styling
-4. Has a professional layout with product images, titles, prices, and call-to-action buttons
-5. Is mobile-responsive and works across email clients
-
-Return ONLY the HTML code, no explanations or markdown formatting.
-"""
-                
-                # Create the email template using OpenAI
-                response = client.chat.completions.create(
-                    model="gpt-3.5-turbo",
-                    messages=[
-                        {"role": "system", "content": "You are an expert email template designer. Create responsive, professional HTML email templates that work across all email clients."},
-                        {"role": "user", "content": prompt}
-                    ],
-                    temperature=0.7,
-                )
-                
-                # Extract content from the response
-                html_template = response.choices[0].message.content
-                
-                # Clean up HTML template by removing markdown code block markers
-                if html_template:
-                    # Remove ```html at the beginning
-                    if html_template.strip().startswith('```html'):
-                        html_template = html_template.strip()[7:]  # Remove ```html
-                    elif html_template.strip().startswith('```'):
-                        html_template = html_template.strip()[3:]   # Remove ```
-                    
-                    # Remove ``` at the end
-                    if html_template.strip().endswith('```'):
-                        html_template = html_template.strip()[:-3]  # Remove trailing ```
-                    
-                    # Clean up any extra whitespace
-                    html_template = html_template.strip()
-                
-                return {
-                    "message": f"Perfect! I've generated your email template featuring {len(products)} product(s) with a {context.get('tone', 'professional')} tone. The template is ready to use!",
-                    "html": html_template,
-                    "products": products,
-                    "next_step": "complete"
-                }
-                if html_template:
-                    # Remove ```html at the beginning
-                    if html_template.strip().startswith('```html'):
-                        html_template = html_template.strip()[7:]  # Remove ```html
-                    elif html_template.strip().startswith('```'):
-                        html_template = html_template.strip()[3:]   # Remove ```
-                    
-                    # Remove ``` at the end
-                    if html_template.strip().endswith('```'):
-                        html_template = html_template.strip()[:-3]  # Remove trailing ```
-                    
-                    # Clean up any extra whitespace
-                    html_template = html_template.strip()
-                
-                return {
-                    "message": f"Perfect! I've generated your email template featuring {len(products)} product(s) with a {context.get('tone', 'professional')} tone. The template is ready to use!",
-                    "html": html_template,
-                    "products": products,
-                    "next_step": "complete"
-                }
-                
-            except Exception as e:
-                raise HTTPException(status_code=500, detail=f"Error generating template: {str(e)}")
+            # Step 3: Start streaming template generation
+            return {
+                "message": "Starting to generate your email template...",
+                "start_streaming": True,
+                "next_step": "complete"
+            }
         
         else:
             # Default: Initial message or general chat
@@ -336,11 +197,7 @@ def stream_template(request: ChatRequest):
 Create a professional HTML email template with the following requirements:
 
 **Template Details:**
-- Tone: {context.get('tone', 'professional')}
-- Target Audience: {context.get('audience', 'customers')}
-- Purpose: {context.get('purpose', 'product promotion')}
-- Style Preferences: {context.get('style', 'clean and modern')}
-
+{context.get('prompt', 'Not given')}
 **Products to Feature:**
 """
             
@@ -383,10 +240,10 @@ Return ONLY the HTML code, no explanations or markdown formatting.
                     content = chunk.choices[0].delta.content
                     html_content += content
                     
-                    # Send each chunk to the client
+                    # Send each chunk to the client with proper SSE format
                     yield f"data: {json.dumps({'html_chunk': content})}\n\n"
-                    time.sleep(0.01)  # Small delay to make streaming visible
-            
+                    # Flush the response to ensure immediate sending
+                    
             # Clean up HTML template by removing markdown code block markers
             if html_content:
                 # Remove ```html at the beginning
@@ -403,7 +260,7 @@ Return ONLY the HTML code, no explanations or markdown formatting.
                 html_content = html_content.strip()
             
             # Send completion message
-            completion_message = f"Perfect! I've generated your email template featuring {len(products)} product(s) with a {context.get('tone', 'professional')} tone. The template is ready to use!"
+            completion_message = f"Perfect! I've generated your email template featuring {len(products)} product(s). The template is ready to use!"
             yield f"data: {json.dumps({'complete': True, 'final_html': html_content, 'message': completion_message})}\n\n"
             
         except Exception as e:
@@ -411,12 +268,13 @@ Return ONLY the HTML code, no explanations or markdown formatting.
     
     return StreamingResponse(
         generate_stream(),
-        media_type="text/plain",
+        media_type="text/event-stream",
         headers={
             "Cache-Control": "no-cache",
             "Connection": "keep-alive",
             "Access-Control-Allow-Origin": "http://localhost:3000",
             "Access-Control-Allow-Headers": "*",
+            "Access-Control-Allow-Methods": "POST, GET, OPTIONS",
         }
     )
 

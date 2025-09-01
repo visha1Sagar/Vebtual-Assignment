@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { FiKey, FiMessageSquare, FiCode, FiEye, FiCopy, FiSend } from 'react-icons/fi';
+import { FiKey, FiMessageSquare, FiCode, FiEye, FiSend } from 'react-icons/fi';
 import axios from 'axios';
 import CodeDisplay from './CodeDisplay';
 import PreviewPanel from './PreviewPanel';
@@ -68,20 +68,6 @@ const EmailTemplateGenerator = () => {
     }
   };
 
-  const askForTone = () => {
-    setMessages(prev => [...prev, {
-      type: 'assistant',
-      content: 'What tone would you prefer for your email template?'
-    }]);
-  };
-
-  const askForProductLinks = () => {
-    setMessages(prev => [...prev, {
-      type: 'assistant',
-      content: 'Now, please add product links (one per line or comma-separated):'
-    }]);
-  };
-
   // New function to handle API-based conversation flow
   const handleApiChat = async (message = '', step = '') => {
     return handleApiChatWithContext(message, step, conversationContext);
@@ -127,6 +113,10 @@ const EmailTemplateGenerator = () => {
         // Display generated HTML template
         setGeneratedHtml(response.data.html);
         setConversationStep('complete');
+      } else if (response.data.start_streaming) {
+        // Start streaming template generation
+        setIsLoading(false); // Reset loading state since streaming will handle its own state
+        handleStreamingTemplateGeneration(message, context);
       }
 
       // Update conversation step
