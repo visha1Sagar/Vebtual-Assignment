@@ -12,6 +12,8 @@ const EmailTemplateGenerator = () => {
   const [inputMessage, setInputMessage] = useState('');
   const [generatedHtml, setGeneratedHtml] = useState('');
   const [isLoading, setIsLoading] = useState(false);
+  const [conversationStep, setConversationStep] = useState('');
+  const [conversationContext, setConversationContext] = useState({});
   const messagesEndRef = useRef(null);
   const messagesContainerRef = useRef(null);
   
@@ -41,39 +43,26 @@ const EmailTemplateGenerator = () => {
   const handleSetApiKey = () => {
     if (apiKey.trim()) {
       setIsApiKeySet(true);
+      setConversationStep('initial');
       
       // Add initial system message
       setMessages([{
         type: 'system',
-        content: 'API Key set successfully! You can now generate email templates.'
+        content: 'API Key set successfully! Let\'s create your perfect email template.'
       }]);
       
-      // If we already have conversation history with product details, don't restart the flow
-      if (messages.length >= 5) {
-        // Keep the existing conversation and just add a system message
+      // Start the guided conversation
+      setTimeout(() => {
         setMessages(prev => [...prev, {
-          type: 'system',
-          content: 'You can now send a detailed request to generate your email template.'
+          type: 'assistant',
+          content: 'Hi! I\'m ready to help you create an amazing email template. Let\'s start by gathering some details about what you need.'
         }]);
-      } 
-      // If we're starting fresh, guide through tone selection
-      else {
-        // Ask for tone after a short delay
+        
+        // Automatically trigger the detail collection
         setTimeout(() => {
-          setMessages(prev => [...prev, {
-            type: 'assistant',
-            content: 'What tone would you prefer for your email template?'
-          }]);
-          
-          // Show tone options immediately
-          setTimeout(() => {
-            setMessages(prev => [...prev, {
-              type: 'options',
-              content: 'tone-options'
-            }]);
-          }, 500);
+          handleApiChat('start', 'collect_details');
         }, 1000);
-      }
+      }, 500);
     }
   };
 
@@ -91,8 +80,78 @@ const EmailTemplateGenerator = () => {
     }]);
   };
 
+  // New function to handle API-based conversation flow
+  const handleApiChat = async (message = '', step = '') => {
+    return handleApiChatWithContext(message, step, conversationContext);
+  };
+
+  // Function to handle API chat with explicit context
+  const handleApiChatWithContext = async (message = '', step = '', context = {}) => {
+    setIsLoading(true);
+    
+    try {
+      const response = await axios.post('http://localhost:8000/chat', {
+        message: message,
+        apiKey: apiKey,
+        step: step,
+        conversation_context: context
+      });
+
+      // Add assistant response
+      setMessages(prev => [...prev, {
+        type: 'assistant',
+        content: response.data.message
+      }]);
+
+      // Handle different response types
+      if (response.data.questions) {
+        // Show detailed questions for template creation
+        setTimeout(() => {
+          setMessages(prev => [...prev, {
+            type: 'questions',
+            content: response.data.questions
+          }]);
+          setConversationStep('answering_details');
+        }, 500);
+      } else if (response.data.show_tone_options) {
+        // Show tone options
+        setTimeout(() => {
+          setMessages(prev => [...prev, {
+            type: 'options',
+            content: 'tone-options'
+          }]);
+        }, 500);
+      } else if (response.data.html) {
+        // Display generated HTML template
+        setGeneratedHtml(response.data.html);
+        setConversationStep('complete');
+      }
+
+      // Update conversation step
+      if (response.data.next_step) {
+        setConversationStep(response.data.next_step);
+      }
+
+    } catch (error) {
+      console.error('API Chat error:', error);
+      setMessages(prev => [...prev, {
+        type: 'error',
+        content: error.response?.data?.detail || 'Error communicating with the API. Please try again.'
+      }]);
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
   const handleSendMessage = async (promptOverride) => {
-    const prompt = (promptOverride ?? inputMessage).trim();
+    // Handle case where promptOverride might be an event object
+    let prompt;
+    if (typeof promptOverride === 'string') {
+      prompt = promptOverride.trim();
+    } else {
+      prompt = inputMessage.trim();
+    }
+    
     if (!prompt) return;
 
     const userMessage = {
@@ -106,11 +165,89 @@ const EmailTemplateGenerator = () => {
     // Clear input right away
     if (!promptOverride) setInputMessage('');
 
-    console.log('Message count when sending:', messages.length + 1); // +1 for the user message we just added
-    console.log('Current messages:', messages.map(m => ({ type: m.type, content: m.content.substring(0, 50) })));
-
     try {
-      // NO API KEY FLOW - Step by step guided conversation
+      // WITH API KEY FLOW - Use guided conversation
+      if (isApiKeySet) {
+        
+        if (conversationStep === 'answering_details') {
+          // Parse the user's answers to detailed questions
+          const answers = prompt.split('\n').map(line => line.trim()).filter(line => line);
+          
+          // Extract information from answers (simple keyword matching)
+          const context = {};
+          answers.forEach(answer => {
+            const lowerAnswer = answer.toLowerCase();
+            
+            // Extract tone
+            if (lowerAnswer.includes('professional') || lowerAnswer.includes('formal')) {
+              context.tone = 'professional';
+            } else if (lowerAnswer.includes('friendly') || lowerAnswer.includes('casual')) {
+              context.tone = 'friendly';
+            } else if (lowerAnswer.includes('persuasive') || lowerAnswer.includes('sales')) {
+              context.tone = 'persuasive';
+            } else if (lowerAnswer.includes('urgent') || lowerAnswer.includes('limited')) {
+              context.tone = 'urgent';
+            } else if (lowerAnswer.includes('informative') || lowerAnswer.includes('educational')) {
+              context.tone = 'informative';
+            }
+            
+            // Extract audience
+            if (lowerAnswer.includes('customer') || lowerAnswer.includes('client')) {
+              context.audience = 'customers';
+            } else if (lowerAnswer.includes('prospect') || lowerAnswer.includes('lead')) {
+              context.audience = 'prospects';
+            } else if (lowerAnswer.includes('vip') || lowerAnswer.includes('premium')) {
+              context.audience = 'VIP clients';
+            }
+            
+            // Extract purpose
+            if (lowerAnswer.includes('promotion') || lowerAnswer.includes('sale')) {
+              context.purpose = 'product promotion';
+            } else if (lowerAnswer.includes('newsletter') || lowerAnswer.includes('update')) {
+              context.purpose = 'newsletter';
+            } else if (lowerAnswer.includes('announcement') || lowerAnswer.includes('news')) {
+              context.purpose = 'announcement';
+            }
+            
+            // Extract style
+            if (lowerAnswer.includes('modern') || lowerAnswer.includes('clean')) {
+              context.style = 'clean and modern';
+            } else if (lowerAnswer.includes('bold') || lowerAnswer.includes('vibrant')) {
+              context.style = 'bold and vibrant';
+            } else if (lowerAnswer.includes('minimal') || lowerAnswer.includes('simple')) {
+              context.style = 'minimal and simple';
+            }
+          });
+          
+          // Set defaults if not specified
+          if (!context.tone) context.tone = 'professional';
+          if (!context.audience) context.audience = 'customers';
+          if (!context.purpose) context.purpose = 'product promotion';
+          if (!context.style) context.style = 'clean and modern';
+          
+          setConversationContext(context);
+          
+          // Move to URL collection step - pass the context directly
+          setTimeout(() => {
+            handleApiChatWithContext(prompt, 'collect_urls', context);
+          }, 500);
+          
+        } else if (conversationStep === 'collect_urls') {
+          // User provided product URLs
+          const updatedContext = {...conversationContext, urls: prompt};
+          setConversationContext(updatedContext);
+          handleApiChatWithContext(prompt, 'generate_template', updatedContext);
+          
+        } else {
+          // Initial or general message
+          handleApiChat(prompt, conversationStep || '');
+        }
+        
+        setIsLoading(false);
+        return;
+      }
+      
+      // NO API KEY FLOW - Step by step guided conversation (existing logic)
       if (!isApiKeySet) {
         // Step 1: User's first message after greeting - Ask for tone
         if (messages.length === 1) {
@@ -254,51 +391,6 @@ const EmailTemplateGenerator = () => {
         console.log('No step matched for message count:', messages.length);
       }
       
-      // WITH API KEY FLOW - Use backend API
-      else {
-        // Add loading message
-        setMessages(prev => [...prev, {
-          type: 'assistant',
-          content: 'Processing your request...'
-        }]);
-        
-        try {
-          // Check if backend is available first
-          try {
-            await axios.get('http://localhost:8000/status');
-          } catch (backendError) {
-            console.error("Backend connection error:", backendError);
-            setMessages(prev => [...prev.slice(0, -1), {
-              type: 'error',
-              content: 'Error: Cannot connect to backend server. Please ensure the backend is running on port 8000.'
-            }]);
-            setIsLoading(false);
-            return;
-          }
-          
-          // Backend is available, now send the actual request
-          const response = await axios.post('http://localhost:8000/chat', {
-            message: prompt,
-            apiKey: apiKey
-          });
-
-          const assistantMessage = {
-            type: 'assistant',
-            content: response.data.message || 'Email template generated successfully!'
-          };
-
-          setMessages(prev => [...prev.slice(0, -1), assistantMessage]);
-          if (response.data.html) {
-            setGeneratedHtml(response.data.html);
-          }
-        } catch (apiError) {
-          console.error("API error:", apiError);
-          setMessages(prev => [...prev.slice(0, -1), {
-            type: 'error',
-            content: 'Error connecting to the API. Please check that the backend server is running.'
-          }]);
-        }
-      }
     } catch (error) {
       console.error("Unexpected error:", error);
       setMessages(prev => {
@@ -421,12 +513,21 @@ const EmailTemplateGenerator = () => {
         // Check if the last assistant message asks for product URL
         const lastAssistantMessage = messages.slice().reverse().find(m => m.type === 'assistant');
         if (lastAssistantMessage && lastAssistantMessage.content.includes('product URL')) {
-          return "Product link 1\nProduct link 2\nProduct link 3\n...";
+          return "https://example.com/product1\nhttps://example.com/product2\nhttps://example.com/product3";
         }
       }
-      return "";
+      return "Tell me about the email template you need...";
+    } else {
+      // With API key - different placeholders based on conversation step
+      if (conversationStep === 'answering_details') {
+        return "1. Professional tone\n2. Existing customers\n3. Product promotion\n4. Clean and modern style";
+      } else if (conversationStep === 'collect_urls') {
+        return "https://example.com/product1\nhttps://example.com/product2\nhttps://example.com/product3";
+      } else if (conversationStep === 'complete') {
+        return "Your template is ready! Ask me to make any changes...";
+      }
+      return "Let me know what you need help with...";
     }
-    return "";
   };
 
   const handleKeyPress = (e) => {
@@ -494,6 +595,24 @@ const EmailTemplateGenerator = () => {
                           <button className="chip" onClick={() => handleQuickPrompt('Informative tone')}>Informative</button>
                         </div>
                       </div>
+                    ) : message.type === 'questions' ? (
+                      <div className="detailed-questions">
+                        <div className="questions-list">
+                          {Array.isArray(message.content) ? message.content.map((question, qIndex) => (
+                            <div key={qIndex} className="question-item">
+                              <span className="question-number">{qIndex + 1}.</span>
+                              <span className="question-text">{question}</span>
+                            </div>
+                          )) : (
+                            <div className="question-item">
+                              <span className="question-text">{message.content}</span>
+                            </div>
+                          )}
+                        </div>
+                        <div className="questions-hint">
+                          <small>Please answer in a single response.</small>
+                        </div>
+                      </div>
                     ) : (
                       <div className="message-content">
                         {message.content}
@@ -515,7 +634,7 @@ const EmailTemplateGenerator = () => {
                 className="chat-input"
               />
               <button 
-                onClick={handleSendMessage}
+                onClick={() => handleSendMessage()}
                 disabled={!inputMessage.trim() || isLoading}
                 className="send-btn"
               >
