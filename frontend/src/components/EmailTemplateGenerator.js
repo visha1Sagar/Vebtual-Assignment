@@ -11,6 +11,8 @@ const EmailTemplateGenerator = () => {
   const [messages, setMessages] = useState([]);
   const [inputMessage, setInputMessage] = useState('');
   const [generatedHtml, setGeneratedHtml] = useState('');
+  const [streamingHtml, setStreamingHtml] = useState(''); // For real-time HTML updates
+  const [isStreaming, setIsStreaming] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
   const [conversationStep, setConversationStep] = useState('');
   const [conversationContext, setConversationContext] = useState({});
@@ -143,6 +145,108 @@ const EmailTemplateGenerator = () => {
     }
   };
 
+  // Function to handle streaming template generation
+  const handleStreamingTemplateGeneration = async (message, context) => {
+    setIsStreaming(true);
+    setStreamingHtml('');
+    setMessages(prev => [...prev, {
+      type: 'assistant',
+      content: 'Starting to generate your email template...'
+    }]);
+
+    try {
+      const response = await fetch('http://localhost:8000/stream-template', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          message: message,
+          apiKey: apiKey,
+          conversation_context: context
+        }),
+      });
+
+      if (!response.ok) {
+        throw new Error(`HTTP error! status: ${response.status}`);
+      }
+
+      const reader = response.body.getReader();
+      const decoder = new TextDecoder();
+      let htmlBuffer = '';
+
+      while (true) {
+        const { done, value } = await reader.read();
+        
+        if (done) break;
+
+        const chunk = decoder.decode(value, { stream: true });
+        const lines = chunk.split('\n');
+
+        for (const line of lines) {
+          if (line.startsWith('data: ')) {
+            try {
+              const data = JSON.parse(line.slice(6));
+              
+              if (data.error) {
+                setMessages(prev => [...prev, {
+                  type: 'error',
+                  content: data.error
+                }]);
+                return;
+              }
+              
+              if (data.status) {
+                setMessages(prev => {
+                  const newMessages = [...prev];
+                  const lastMessage = newMessages[newMessages.length - 1];
+                  if (lastMessage && lastMessage.type === 'assistant') {
+                    lastMessage.content = data.status;
+                  }
+                  return newMessages;
+                });
+              }
+              
+              if (data.products) {
+                setMessages(prev => [...prev, {
+                  type: 'assistant',
+                  content: `Found ${data.products.length} products. Generating template...`
+                }]);
+              }
+              
+              if (data.html_chunk) {
+                htmlBuffer += data.html_chunk;
+                setStreamingHtml(htmlBuffer);
+              }
+              
+              if (data.complete) {
+                setGeneratedHtml(data.final_html);
+                setStreamingHtml('');
+                setMessages(prev => [...prev, {
+                  type: 'assistant',
+                  content: data.message
+                }]);
+                setConversationStep('complete');
+              }
+              
+            } catch (parseError) {
+              console.error('Error parsing SSE data:', parseError);
+            }
+          }
+        }
+      }
+
+    } catch (error) {
+      console.error('Streaming error:', error);
+      setMessages(prev => [...prev, {
+        type: 'error',
+        content: 'Error generating template. Please try again.'
+      }]);
+    } finally {
+      setIsStreaming(false);
+    }
+  };
+
   const handleSendMessage = async (promptOverride) => {
     // Handle case where promptOverride might be an event object
     let prompt;
@@ -171,60 +275,11 @@ const EmailTemplateGenerator = () => {
         
         if (conversationStep === 'answering_details') {
           // Parse the user's answers to detailed questions
-          const answers = prompt.split('\n').map(line => line.trim()).filter(line => line);
           
-          // Extract information from answers (simple keyword matching)
-          const context = {};
-          answers.forEach(answer => {
-            const lowerAnswer = answer.toLowerCase();
-            
-            // Extract tone
-            if (lowerAnswer.includes('professional') || lowerAnswer.includes('formal')) {
-              context.tone = 'professional';
-            } else if (lowerAnswer.includes('friendly') || lowerAnswer.includes('casual')) {
-              context.tone = 'friendly';
-            } else if (lowerAnswer.includes('persuasive') || lowerAnswer.includes('sales')) {
-              context.tone = 'persuasive';
-            } else if (lowerAnswer.includes('urgent') || lowerAnswer.includes('limited')) {
-              context.tone = 'urgent';
-            } else if (lowerAnswer.includes('informative') || lowerAnswer.includes('educational')) {
-              context.tone = 'informative';
-            }
-            
-            // Extract audience
-            if (lowerAnswer.includes('customer') || lowerAnswer.includes('client')) {
-              context.audience = 'customers';
-            } else if (lowerAnswer.includes('prospect') || lowerAnswer.includes('lead')) {
-              context.audience = 'prospects';
-            } else if (lowerAnswer.includes('vip') || lowerAnswer.includes('premium')) {
-              context.audience = 'VIP clients';
-            }
-            
-            // Extract purpose
-            if (lowerAnswer.includes('promotion') || lowerAnswer.includes('sale')) {
-              context.purpose = 'product promotion';
-            } else if (lowerAnswer.includes('newsletter') || lowerAnswer.includes('update')) {
-              context.purpose = 'newsletter';
-            } else if (lowerAnswer.includes('announcement') || lowerAnswer.includes('news')) {
-              context.purpose = 'announcement';
-            }
-            
-            // Extract style
-            if (lowerAnswer.includes('modern') || lowerAnswer.includes('clean')) {
-              context.style = 'clean and modern';
-            } else if (lowerAnswer.includes('bold') || lowerAnswer.includes('vibrant')) {
-              context.style = 'bold and vibrant';
-            } else if (lowerAnswer.includes('minimal') || lowerAnswer.includes('simple')) {
-              context.style = 'minimal and simple';
-            }
-          });
-          
-          // Set defaults if not specified
-          if (!context.tone) context.tone = 'professional';
-          if (!context.audience) context.audience = 'customers';
-          if (!context.purpose) context.purpose = 'product promotion';
-          if (!context.style) context.style = 'clean and modern';
-          
+          // Pass whole prompt
+          const context = {
+            prompt
+          };
           setConversationContext(context);
           
           // Move to URL collection step - pass the context directly
@@ -233,10 +288,13 @@ const EmailTemplateGenerator = () => {
           }, 500);
           
         } else if (conversationStep === 'collect_urls') {
-          // User provided product URLs
+          // User provided product URLs - Use streaming for template generation
           const updatedContext = {...conversationContext, urls: prompt};
           setConversationContext(updatedContext);
-          handleApiChatWithContext(prompt, 'generate_template', updatedContext);
+          
+          // Use streaming for template generation
+          setIsLoading(false); // Reset loading state since streaming will handle its own state
+          handleStreamingTemplateGeneration(prompt, updatedContext);
           
         } else {
           // Initial or general message
@@ -649,7 +707,10 @@ const EmailTemplateGenerator = () => {
               <FiCode />
               <h3>Generated HTML</h3>
             </div>
-            <CodeDisplay code={generatedHtml || ""} />
+            <CodeDisplay 
+              code={streamingHtml || generatedHtml || ""} 
+              isStreaming={isStreaming}
+            />
           </div>
 
           {/* Preview Panel */}
@@ -658,7 +719,10 @@ const EmailTemplateGenerator = () => {
               <FiEye />
               <h3>Preview</h3>
             </div>
-            <PreviewPanel html={generatedHtml || ""} />
+            <PreviewPanel 
+              html={streamingHtml || generatedHtml || ""} 
+              isStreaming={isStreaming}
+            />
           </div>
         </div>
       </div>

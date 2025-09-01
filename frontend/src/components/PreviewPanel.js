@@ -1,19 +1,34 @@
 import React from 'react';
 import './PreviewPanel.css';
 
-const PreviewPanel = ({ html }) => {
+const PreviewPanel = ({ html, isStreaming = false }) => {
   return (
     <div className="preview-container">
       {html ? (
-        <iframe
-          title="Email Preview"
-          srcDoc={html}
-          className="preview-iframe"
-          sandbox="allow-same-origin"
-        />
+        <div className="preview-wrapper">
+          {isStreaming && (
+            <div className="streaming-banner">
+              <div className="streaming-indicator-preview"></div>
+              <span>Live Preview - Updating in real-time...</span>
+            </div>
+          )}
+          <iframe
+            title="Email Preview"
+            srcDoc={html}
+            className={`preview-iframe ${isStreaming ? 'streaming' : ''}`}
+            sandbox="allow-same-origin"
+          />
+        </div>
       ) : (
         <div className="empty-preview">
-          <p>Preview will appear here once you generate an email template.</p>
+          {isStreaming ? (
+            <div className="streaming-preview-placeholder">
+              <div className="streaming-dots-preview"></div>
+              <p>Generating preview...</p>
+            </div>
+          ) : (
+            <p>Preview will appear here once you generate an email template.</p>
+          )}
         </div>
       )}
     </div>

@@ -4,7 +4,7 @@ import { oneDark } from 'react-syntax-highlighter/dist/esm/styles/prism';
 import { FiCopy, FiCheck } from 'react-icons/fi';
 import './CodeDisplay.css';
 
-const CodeDisplay = ({ code }) => {
+const CodeDisplay = ({ code, isStreaming = false }) => {
   const [copied, setCopied] = useState(false);
 
   const handleCopy = async () => {
@@ -20,11 +20,14 @@ const CodeDisplay = ({ code }) => {
   return (
     <div className="code-display">
       <div className="code-header">
-        <span className="code-language">HTML</span>
+        <span className="code-language">
+          HTML
+          {isStreaming && <span className="streaming-indicator"> • Generating...</span>}
+        </span>
         <button 
           onClick={handleCopy}
-          disabled={!code}
-          className={`copy-btn ${copied ? 'copied' : ''}`}
+          disabled={!code || isStreaming}
+          className={`copy-btn ${copied ? 'copied' : ''} ${isStreaming ? 'disabled' : ''}`}
         >
           {copied ? <FiCheck /> : <FiCopy />}
           {copied ? 'Copied!' : 'Copy'}
@@ -43,7 +46,8 @@ const CodeDisplay = ({ code }) => {
               maxWidth: '100%',
               overflowX: 'auto',
               whiteSpace: 'pre-wrap',
-              wordBreak: 'break-word'
+              wordBreak: 'break-word',
+              ...(isStreaming && { border: '2px solid #4F46E5', boxShadow: '0 0 10px rgba(79, 70, 229, 0.3)' })
             }}
             wrapLongLines={true}
           >
@@ -51,7 +55,14 @@ const CodeDisplay = ({ code }) => {
           </SyntaxHighlighter>
         ) : (
           <div className="empty-code">
-            <p>No code generated yet. Start a conversation to generate an email template.</p>
+            {isStreaming ? (
+              <div className="streaming-placeholder">
+                <div className="streaming-dots"></div>
+                <p>Generating HTML code...</p>
+              </div>
+            ) : (
+              <p>No code generated yet. Start a conversation to generate an email template.</p>
+            )}
           </div>
         )}
       </div>
