@@ -39,8 +39,13 @@ const CodeDisplay = ({ code }) => {
             customStyle={{
               margin: 0,
               borderRadius: '0 0 8px 8px',
-              fontSize: '14px'
+              fontSize: '14px',
+              maxWidth: '100%',
+              overflowX: 'auto',
+              whiteSpace: 'pre-wrap',
+              wordBreak: 'break-word'
             }}
+            wrapLongLines={true}
           >
             {code}
           </SyntaxHighlighter>

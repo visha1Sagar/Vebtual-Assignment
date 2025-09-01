@@ -26,8 +26,8 @@ class ChatRequest(BaseModel):
     apiKey: str = ""
     step: str = ""  # Track which step of the flow we're in
 
-@app.get("/reply")
-def reply():
+@app.get("/status")
+def status():
     return {"message": "This is a reply from the FastAPI server."}
 
 @app.get("/fetch_info")

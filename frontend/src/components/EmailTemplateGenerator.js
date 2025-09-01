@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { FiKey, FiMessageSquare, FiCode, FiEye, FiCopy, FiSend } from 'react-icons/fi';
 import axios from 'axios';
 import CodeDisplay from './CodeDisplay';
@@ -12,13 +12,27 @@ const EmailTemplateGenerator = () => {
   const [inputMessage, setInputMessage] = useState('');
   const [generatedHtml, setGeneratedHtml] = useState('');
   const [isLoading, setIsLoading] = useState(false);
+  const messagesEndRef = useRef(null);
+  const messagesContainerRef = useRef(null);
+  
+  // Function to scroll to bottom of messages
+  const scrollToBottom = () => {
+    if (messagesContainerRef.current) {
+      messagesContainerRef.current.scrollTop = messagesContainerRef.current.scrollHeight;
+    }
+  };
+
+  // Auto-scroll when messages change
+  useEffect(() => {
+    scrollToBottom();
+  }, [messages]);
   
   // Show welcome message when component mounts
   useEffect(() => {
     const timer = setTimeout(() => {
       setMessages([{
         type: 'assistant',
-        content: '👋 Welcome to Email Template Generator! I can help you create professional email templates. To get started, please tell me a bit about the email you want to create or what type of business you\'re in.'
+        content: '👋 Welcome to Email Template Generator! How can I assist you today?'
       }]);
     }, 500);
     return () => clearTimeout(timer);
@@ -153,25 +167,85 @@ const EmailTemplateGenerator = () => {
           return;
         }
         
-        // Step 3: User provides product URL - Thank user and prompt for API key
+        // Step 3: User provides product URLs - Fetch product info and generate template
         // After all previous + product_url_question(6) + user_url_response(7) = 7 messages
         if (messages.length === 6) {
-          console.log('Triggering Step 3: Ask for API key');
-          // Remove loading message and add response
+          console.log('Triggering Step 3: Processing product URLs and generating template');
+          
+          // Extract URLs from the user's message
+          const urls = prompt.split('\n').map(url => url.trim()).filter(url => url.length > 0);
+          console.log('Extracted URLs:', urls);
+          
+          // Show processing message
           setTimeout(() => {
             setMessages(prev => {
-              // Find the last message (which should be the loading message)
               const withoutLoading = prev.filter(msg => 
                 msg.type !== 'assistant' || msg.content !== 'Processing your request...'
               );
               
-              // Add our new response
               return [...withoutLoading, {
                 type: 'assistant',
-                content: 'Excellent! I have all the information needed to create your email template. To generate the actual template, please enter your OpenAI API key in the field above and then I can create your professional email template.'
+                content: 'Great! Let me fetch the product information and generate your email template...'
               }];
             });
           }, 500);
+          
+          // Fetch product information for each URL
+          try {
+            const productPromises = urls.map(async (url) => {
+              try {
+                const response = await axios.get(`http://localhost:8000/fetch_info?url=${encodeURIComponent(url)}`);
+                return {
+                  url: url,
+                  title: response.data.title,
+                  image: response.data.image,
+                  price: response.data.price
+                };
+              } catch (error) {
+                console.error(`Error fetching info for ${url}:`, error);
+                return {
+                  url: url,
+                  title: 'Product Title',
+                  image: 'placeholder.jpg',
+                  price: 'N/A'
+                };
+              }
+            });
+            
+            const products = await Promise.all(productPromises);
+            console.log('Fetched product data:', products);
+            
+            // Get the selected tone from previous messages
+            const toneMessage = messages.find(msg => 
+              msg.type === 'user' && 
+              (msg.content.includes('tone') || msg.content.includes('Professional') || msg.content.includes('Friendly') || 
+               msg.content.includes('Persuasive') || msg.content.includes('Urgent') || msg.content.includes('Informative'))
+            );
+            const selectedTone = toneMessage ? toneMessage.content.toLowerCase() : 'professional';
+            
+            // Generate email template based on tone
+            const htmlTemplate = generateEmailTemplate(products, selectedTone);
+            
+            // Update the generated HTML
+            setGeneratedHtml(htmlTemplate);
+            
+            // Show completion message
+            setTimeout(() => {
+              setMessages(prev => [...prev, {
+                type: 'assistant',
+                content: 'Perfect! I\'ve generated your email template with the product information. You can see the HTML code and preview on the right. The template is ready to use!'
+              }]);
+            }, 1000);
+            
+          } catch (error) {
+            console.error('Error processing product URLs:', error);
+            setTimeout(() => {
+              setMessages(prev => [...prev, {
+                type: 'error',
+                content: 'There was an error fetching product information. Please check your URLs and try again.'
+              }]);
+            }, 500);
+          }
           
           setIsLoading(false);
           return;
@@ -191,7 +265,7 @@ const EmailTemplateGenerator = () => {
         try {
           // Check if backend is available first
           try {
-            await axios.get('http://localhost:8000/reply');
+            await axios.get('http://localhost:8000/status');
           } catch (backendError) {
             console.error("Backend connection error:", backendError);
             setMessages(prev => [...prev.slice(0, -1), {
@@ -242,6 +316,96 @@ const EmailTemplateGenerator = () => {
     } finally {
       setIsLoading(false);
     }
+  };
+
+  // Function to generate email template based on products and tone
+  const generateEmailTemplate = (products, tone) => {
+    let greeting = '';
+    let closing = '';
+    let style = '';
+    
+    // Set tone-specific content
+    if (tone.includes('professional')) {
+      greeting = 'Dear Valued Customer,';
+      closing = 'Best regards,<br>The Team';
+      style = 'color: #333; font-family: Arial, sans-serif;';
+    } else if (tone.includes('friendly')) {
+      greeting = 'Hi there! 👋';
+      closing = 'Cheers,<br>Your Friends at Our Store! 😊';
+      style = 'color: #444; font-family: "Comic Sans MS", cursive;';
+    } else if (tone.includes('persuasive')) {
+      greeting = 'Don\'t Miss Out!';
+      closing = 'Act Now!<br>Limited Time Offer Team';
+      style = 'color: #d73527; font-family: Impact, Arial, sans-serif; font-weight: bold;';
+    } else if (tone.includes('urgent')) {
+      greeting = '⚡ URGENT: Limited Time Only! ⚡';
+      closing = 'Hurry - Offer Expires Soon!<br>Sales Team';
+      style = 'color: #ff0000; font-family: Arial, sans-serif; font-weight: bold;';
+    } else if (tone.includes('informative')) {
+      greeting = 'Product Information Update';
+      closing = 'For more information, contact us.<br>Customer Service Team';
+      style = 'color: #2c3e50; font-family: Georgia, serif;';
+    } else {
+      greeting = 'Hello,';
+      closing = 'Thank you,<br>The Team';
+      style = 'color: #333; font-family: Arial, sans-serif;';
+    }
+    
+    // Generate product cards HTML
+    const productCards = products.map(product => `
+      <div style="border: 1px solid #ddd; border-radius: 8px; padding: 20px; margin: 20px 0; background: #fff;">
+        <div style="display: flex; align-items: center; gap: 20px;">
+          <img src="${product.image}" alt="${product.title}" style="width: 150px; height: 150px; object-fit: cover; border-radius: 8px;" />
+          <div style="flex: 1;">
+            <h3 style="margin: 0 0 10px 0; ${style}">${product.title}</h3>
+            <p style="font-size: 24px; font-weight: bold; color: #e74c3c; margin: 10px 0;">
+              ${product.price}
+            </p>
+            <a href="${product.url}" style="display: inline-block; background: #3498db; color: white; padding: 12px 24px; text-decoration: none; border-radius: 5px; font-weight: bold;">
+              View Product
+            </a>
+          </div>
+        </div>
+      </div>
+    `).join('');
+    
+    // Complete email template
+    return `
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Product Email</title>
+</head>
+<body style="margin: 0; padding: 0; background-color: #f4f4f4; font-family: Arial, sans-serif;">
+  <div style="max-width: 600px; margin: 0 auto; background: #ffffff; padding: 20px;">
+    <header style="text-align: center; padding: 20px 0; border-bottom: 2px solid #eee;">
+      <h1 style="${style} margin: 0;">${greeting}</h1>
+    </header>
+    
+    <main style="padding: 30px 0;">
+      <p style="${style} font-size: 16px; line-height: 1.6;">
+        We're excited to share these amazing products with you!
+      </p>
+      
+      ${productCards}
+      
+      <div style="text-align: center; margin: 30px 0;">
+        <p style="${style} font-size: 16px;">
+          ${tone.includes('urgent') ? 'Don\'t wait - these deals won\'t last long!' : 
+            tone.includes('persuasive') ? 'These exclusive offers are waiting for you!' :
+            'Thank you for being a valued customer.'}
+        </p>
+      </div>
+    </main>
+    
+    <footer style="text-align: center; padding: 20px 0; border-top: 2px solid #eee; margin-top: 20px;">
+      <p style="${style} margin: 0;">${closing}</p>
+    </footer>
+  </div>
+</body>
+</html>`;
   };
 
   const handleQuickPrompt = (text) => {
@@ -311,7 +475,7 @@ const EmailTemplateGenerator = () => {
               <h3>Chat</h3>
             </div>
             
-            <div className="messages-container">
+            <div className="messages-container" ref={messagesContainerRef}>
               {messages.length === 0 ? (
                 <div className="empty-state">
                   <div className="empty-title">Start your conversation</div>
@@ -338,6 +502,7 @@ const EmailTemplateGenerator = () => {
                   </div>
                 ))
               )}
+              <div ref={messagesEndRef} />
             </div>
 
             <div className="chat-input-container">
@@ -348,7 +513,6 @@ const EmailTemplateGenerator = () => {
                 placeholder={getPlaceholderText()}
                 disabled={isLoading}
                 className="chat-input"
-                rows="3"
               />
               <button 
                 onClick={handleSendMessage}

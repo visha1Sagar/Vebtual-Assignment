@@ -59,7 +59,12 @@
 
 .code-content {
   flex: 1;
-  overflow: auto;
+  overflow-y: auto;
+  overflow-x: auto;
+  max-width: 100%;
+  word-wrap: break-word;
+  white-space: pre-wrap;
+  max-height: 500px;
 }
 
 .empty-code {
